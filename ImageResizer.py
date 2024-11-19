@@ -4,6 +4,9 @@ from PIL import Image
 import os
 from tkinterdnd2 import DND_FILES, TkinterDnD
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
+from queue import Queue
+
 
 class ImageResizerApp:
     def __init__(self, root):
@@ -13,6 +16,9 @@ class ImageResizerApp:
         self.folder_path = os.path.join(os.path.expanduser("~"), "Downloads")
         self.loaded_files = []
         self.supported_formats = ['.png', '.jpg', '.jpeg', '.gif', '.webp']
+
+        self.processed_count = 0
+        self.error_queue = Queue()
 
         self.setup_ui()
         
@@ -185,6 +191,74 @@ class ImageResizerApp:
             except ValueError:
                 raise ValueError("Please enter valid dimensions")
 
+    def process_single_image(self, file_info):
+        file_path, output_dir = file_info
+        try:
+            with Image.open(file_path) as img:
+                # Calculate new dimensions
+                new_width, new_height = self.calculate_new_dimensions(img.width, img.height)
+                resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                
+                # Create new filename with dimensions
+                filename, ext = os.path.splitext(os.path.basename(file_path))
+                new_filename = f"{filename}_{new_width}x{new_height}{ext}"
+                output_path = os.path.join(output_dir, new_filename)
+                
+                resized_img.save(output_path)
+                
+                return True
+        except Exception as e:
+            self.error_queue.put((file_path, str(e)))
+            return False
+
+    def update_progress(self):
+        self.processed_count += 1
+        self.progress_bar['value'] = self.processed_count
+        
+        # Update status label with current file count
+        self.status_label['text'] = f"Processed {self.processed_count} of {len(self.loaded_files)} images..."
+        
+        # Check if all files have been processed
+        if self.processed_count >= len(self.loaded_files):
+            self.finalize_resize()
+
+    def process_complete(self, future):
+        self.root.after(0, self.update_progress)
+
+    def finalize_resize(self):
+        while not self.error_queue.empty():
+            file_path, error_msg = self.error_queue.get()
+            messagebox.showerror("Error", f"Error resizing {os.path.basename(file_path)}: {error_msg}")
+        
+        self.status_label['text'] = "Resizing complete!"
+        self.resize_button.grid()
+        self.open_folder_button.grid()
+        self.executor.shutdown(wait=False)
+        self.error_queue = Queue()
+
+    def resize_images(self):
+        if not self.loaded_files:
+            messagebox.showwarning("No Images", "Please load images first.")
+            return
+
+        output_dir = os.path.join(self.folder_path, "resized_images")
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Initialize processing variables
+        self.processed_count = 0
+        self.error_queue = Queue()
+        self.progress_bar['maximum'] = len(self.loaded_files)
+        self.progress_bar.grid()
+        self.resize_button.grid_remove()
+
+        # Create a thread pool executor
+        self.executor = ThreadPoolExecutor(max_workers=min(4, len(self.loaded_files)))
+
+        # Submit all files for processing
+        for file_path in self.loaded_files:
+            future = self.executor.submit(self.process_single_image, (file_path, output_dir))
+            future.add_done_callback(self.process_complete)
+        
     def resize_images(self):
         if not self.loaded_files:
             messagebox.showwarning("No Images", "Please load images first.")
@@ -207,8 +281,10 @@ class ImageResizerApp:
                     new_width, new_height = self.calculate_new_dimensions(img.width, img.height)
                     resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
                     
-                    # Save with original format
-                    output_path = os.path.join(output_dir, os.path.basename(file_path))
+                    # Create new filename with dimensions
+                    filename, ext = os.path.splitext(os.path.basename(file_path))
+                    new_filename = f"{filename}_{new_width}x{new_height}{ext}"
+                    output_path = os.path.join(output_dir, new_filename)
                     resized_img.save(output_path)
 
                 self.progress_bar['value'] = i

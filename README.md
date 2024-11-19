@@ -5,3 +5,6 @@ Currently it supports converting images from and to PNG, JPG, JPEG, GIF and WEBP
 
 ##### Image Resizer
 Resizes and scales up images (w/ or w/o maintaining aspect ratio)
+
+##### Image Processor
+Processes images by applying filters such as grayscale, sepia, negative, blur etc.
